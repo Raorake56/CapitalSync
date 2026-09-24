@@ -1,6 +1,40 @@
 "use client";
-import {useState} from "react";
-import {ArrowLeft,Check,Eye,EyeOff,Lock,Mail} from "lucide-react";
-export function AuthGate({complete}:any){const[step,setStep]=useState(0),[email,setEmail]=useState(""),[otp,setOtp]=useState(""),[password,setPassword]=useState(""),[show,setShow]=useState(false);return <main className="authPage"><section className="authBrand"><Logo/><div><span>FUNDRAISING INTELLIGENCE</span><h1>Turn every LP relationship into institutional memory.</h1><p>A focused workspace for GP fundraising teams to understand fit, momentum, and the next best action.</p></div><small><Lock/> Private workspace · Capital Sync</small></section><section className="authPanel"><div className="authCard">{step===0&&<><AuthCopy eyebrow="TEAM SIGN IN" title="Welcome back" body="Access your GP–LP fundraising workspace."/><label className="plainAuthField"><span>Work email</span><input autoFocus type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@firm.com"/></label><label className="plainAuthField"><span>Password</span><div><input type={show?"text":"password"} value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter your password"/><button onClick={()=>setShow(!show)} aria-label={show?"Hide password":"Show password"}>{show?<EyeOff/>:<Eye/>}</button></div></label><button className="authPrimary" onClick={complete}>Enter workspace →</button><div className="or"><span/>or<span/></div><button className="google" onClick={complete}><b>G</b>Continue with Google</button><div className="demoAccess"><Lock/><p><b>New to Capital Sync?</b><span>Verify your work email to create a secure workspace.</span></p><button onClick={()=>setStep(1)}>Register</button></div></>}{step===1&&<><Back go={()=>setStep(0)}/><AuthCopy eyebrow="CREATE AN ACCOUNT" title="Enter your work email" body="We’ll send a one-time verification code."/><Field icon={<Mail/>} label="Email address"><input autoFocus type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@firm.com"/></Field><button className="authPrimary" disabled={!email.includes("@")} onClick={()=>setStep(2)}>Send verification code</button></>}{step===2&&<><Back go={()=>setStep(1)}/><AuthCopy eyebrow="EMAIL VERIFICATION" title="Check your inbox" body={`Enter the six-digit code sent to ${email}.`}/><input className="otp" autoFocus inputMode="numeric" maxLength={6} value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,""))} placeholder="000000"/><button className="authPrimary" disabled={otp.length!==6} onClick={()=>setStep(3)}>Verify email</button><button className="textButton">Resend code</button></>}{step===3&&<><Back go={()=>setStep(2)}/><AuthCopy eyebrow="SECURE YOUR ACCOUNT" title="Create a password" body="Use at least eight characters with a number."/><Field icon={<Lock/>} label="Password"><input autoFocus type={show?"text":"password"} value={password} onChange={e=>setPassword(e.target.value)}/><button onClick={()=>setShow(!show)} aria-label={show?"Hide password":"Show password"}>{show?<EyeOff/>:<Eye/>}</button></Field><ul className="passwordRules"><li className={password.length>=8?"met":""}><Check/>At least 8 characters</li><li className={/\d/.test(password)?"met":""}><Check/>At least one number</li></ul><button className="authPrimary" disabled={password.length<8||!/\d/.test(password)} onClick={complete}>Create account</button></>}</div></section></main>}
-function Logo({compact=false}:any){return <div className={compact?"authLogo compact":"authLogo"}><svg viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="#121a2c"/><path d="M23 11a9 9 0 1 0 0 18" fill="none" stroke="#35d1a1" strokeWidth="3.5" strokeLinecap="round"/><path d="M17 29a9 9 0 1 0 0-18" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round"/></svg><span><b>Capital Sync</b>{!compact&&<small>Fundraising intelligence</small>}</span></div>}
-function AuthCopy({eyebrow,title,body}:any){return <div className="authCopy"><small>{eyebrow}</small><h2>{title}</h2><p>{body}</p></div>}function Back({go}:any){return <button className="back" onClick={go}><ArrowLeft/>Back</button>}function Field({icon,label,children}:any){return <label className="authField"><span>{label}</span><div>{icon}{children}</div></label>}
+import {useEffect,useState} from "react";
+import {AlertCircle,Lock} from "lucide-react";
+
+const SUPABASE_URL="https://tnhbwgxibipfohwsczwi.supabase.co";
+const SUPABASE_KEY="sb_publishable_23WJp-uRdOEnlEXuvUu2Kg_Suwo9HZc";
+const SESSION_KEY="capital-sync-auth-session-v1";
+
+type StoredSession={access_token:string;refresh_token?:string;expires_at:number};
+
+async function verifySession(session:StoredSession){
+  if(!session.access_token||session.expires_at<=Math.floor(Date.now()/1000))return null;
+  const response=await fetch(`${SUPABASE_URL}/auth/v1/user`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${session.access_token}`}});
+  return response.ok?response.json():null;
+}
+
+function sessionFromHash():StoredSession|null{
+  const params=new URLSearchParams(window.location.hash.slice(1));
+  const access_token=params.get("access_token"),refresh_token=params.get("refresh_token")||undefined;
+  if(!access_token)return null;
+  const expiresIn=Math.max(60,Number(params.get("expires_in")||3600));
+  window.history.replaceState({},document.title,window.location.pathname+window.location.search);
+  return {access_token,refresh_token,expires_at:Math.floor(Date.now()/1000)+expiresIn};
+}
+
+export function AuthGate({complete}:any){
+  const[loading,setLoading]=useState(true),[error,setError]=useState(""),[email,setEmail]=useState("demo@capitalsync.com"),[password,setPassword]=useState("demo1234");
+  useEffect(()=>{let active=true;(async()=>{try{
+    const callbackSession=sessionFromHash();
+    const stored=callbackSession||JSON.parse(localStorage.getItem(SESSION_KEY)||"null");
+    const user=stored?await verifySession(stored):null;
+    if(stored&&user){localStorage.setItem(SESSION_KEY,JSON.stringify(stored));if(active)complete(user);return}
+    localStorage.removeItem(SESSION_KEY);
+    if(new URLSearchParams(window.location.search).get("error_description"))setError("Google sign-in was not completed. Please try again.");
+  }catch{localStorage.removeItem(SESSION_KEY);setError("We could not verify your session. Please try again.")}finally{if(active)setLoading(false)}})();return()=>{active=false}},[complete]);
+  const enterDemo=()=>{if(email.trim().toLowerCase()==="demo@capitalsync.com"&&password==="demo1234"){complete({id:"demo-user",email,user_metadata:{full_name:"Demo User"},isDemo:true});return}setError("Use the demo credentials shown below to enter the sample workspace.")};
+  return <main className="authPage"><section className="authBrand"><Logo/><div><span>FUNDRAISING INTELLIGENCE</span><h1>Turn every LP relationship into institutional memory.</h1><p>A focused workspace for GP fundraising teams to understand fit, momentum, and the next best action.</p></div><small><Lock/> Private workspace · Capital Sync</small></section><section className="authPanel"><div className="authCard demoLogin"><Logo/><div className="authCopy"><small>TEAM SIGN IN</small><h2>Welcome back</h2><p>Access your GP–LP fundraising workspace.</p></div>{error&&<div className="authError" role="alert"><AlertCircle/>{error}</div>}<label className="plainAuthField"><span>Work email</span><input autoFocus type="email" value={email} onChange={e=>setEmail(e.target.value)}/></label><label className="plainAuthField"><span>Password</span><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&enterDemo()}/></label><button className="authPrimary" onClick={enterDemo}>Enter workspace <span>→</span></button><div className="demoAccess"><Lock/><p><b>Demo access</b><span>demo@capitalsync.com&nbsp;&nbsp;·&nbsp;&nbsp;demo1234</span></p></div></div></section></main>
+}
+
+function Logo(){return <div className="authLogo"><svg viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="#121a2c"/><path d="M23 11a9 9 0 1 0 0 18" fill="none" stroke="#35d1a1" strokeWidth="3.5" strokeLinecap="round"/><path d="M17 29a9 9 0 1 0 0-18" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round"/></svg><span><b>Capital Sync</b><small>Fundraising intelligence</small></span></div>}
